@@ -107,7 +107,165 @@ let state = {products:[], history:[]};
 let storageReady = true;
 
 function notify(text) {
-  $("message").text
-``` [!Loading](#)
+  $("message").textContent = text;
+  $("message").hidden = false;
+}
 
-[sidekick-reference-anchor]: <#>
+try {
+  const raw = localStorage.getItem(KEY);
+  if (raw) {
+    const saved = JSON.parse(raw);
+    if (!saved || !Array.isArray(saved.products) ||
+        !Array.isArray(saved.history)) {
+      throw new Error("Invalid data");
+    }
+    state = saved;
+  }
+} catch (error) {
+  storageReady = false;
+  notify("تعذر قراءة البيانات المحفوظة. لن نستبدلها. تأكد من السماح بالتخزين في المتصفح.");
+}
+
+function persist(next) {
+  if (!storageReady) {
+    notify("التخزين غير متاح، لم يتم حفظ التغيير.");
+    return false;
+  }
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next));
+    state = next;
+    render();
+    return true;
+  } catch (error) {
+    notify("تعذر الحفظ، لم يُعتمد التغيير. قد تكون مساحة التخزين ممتلئة.");
+    return false;
+  }
+}
+
+function cell(row, value) {
+  const td = document.createElement("td");
+  td.textContent = value;
+  row.appendChild(td);
+  return td;
+}
+
+function emptyRow(body, count, text) {
+  const row = document.createElement("tr");
+  const td = cell(row, text);
+  td.colSpan = count;
+  body.appendChild(row);
+}
+
+function render() {
+  const products = state.products;
+  $("productsCount").textContent = products.length;
+  $("unitsCount").textContent = products.reduce((sum,p) => sum+p.qty, 0);
+  $("lowCount").textContent = products.filter(p => p.qty<=p.limit).length;
+
+  const query = $("search").value.trim().toLowerCase();
+  const visible = products.filter(p =>
+    (p.name+" "+p.code).toLowerCase().includes(query)
+  );
+  const body = $("productsBody");
+  body.replaceChildren();
+
+  visible.forEach(p => {
+    const row = document.createElement("tr");
+    if (p.qty<=p.limit) row.className = "low";
+    cell(row,p.name);
+    cell(row,p.code || "—");
+    cell(row,p.qty);
+    cell(row,p.qty===0 ? "نفد المخزون" : p.qty<=p.limit ? "منخفض" : "متوفر");
+    const actions = cell(row,"");
+    actions.className = "actions";
+    ["in","out"].forEach(type => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = type==="in" ? "دخول +" : "خروج −";
+      if(type==="out") button.className="out";
+      button.addEventListener("click",()=>move(p.id,type));
+      actions.appendChild(button);
+    });
+    body.appendChild(row);
+  });
+  if (!visible.length) emptyRow(body,5,"لا توجد منتجات مطابقة.");
+
+  const history = $("historyBody");
+  history.replaceChildren();
+  state.history.slice().reverse().forEach(item => {
+    const row = document.createElement("tr");
+    cell(row,new Date(item.date).toLocaleString("ar-DZ"));
+    cell(row,item.name);
+    cell(row,item.type==="in" ? "دخول" : "خروج");
+    cell(row,item.qty);
+    history.appendChild(row);
+  });
+  if (!state.history.length) emptyRow(history,4,"لا توجد حركات بعد.");
+}
+
+function move(id,type) {
+  const product = state.products.find(p=>p.id===id);
+  if (!product) return;
+  const answer = prompt(
+    (type==="in" ? "كمية الدخول: " : "كمية الخروج: ")+product.name
+  );
+  if (answer===null) return;
+  const qty = Number(answer.trim());
+  if (!Number.isSafeInteger(qty) || qty<=0) {
+    notify("أدخل عددًا صحيحًا أكبر من صفر.");
+    return;
+  }
+  if (type==="out" && qty>product.qty) {
+    notify("الكمية المطلوبة أكبر من المخزون المتوفر.");
+    return;
+  }
+  const nextQty = product.qty + (type==="in" ? qty : -qty);
+  if (!Number.isSafeInteger(nextQty)) {
+    notify("الكمية كبيرة جدًا.");
+    return;
+  }
+  const next = {
+    products:state.products.map(p=>p.id===id ? {...p,qty:nextQty} : p),
+    history:[...state.history,{
+      name:product.name,type,qty,date:new Date().toISOString()
+    }]
+  };
+  if (persist(next)) notify("تم تسجيل حركة البضاعة وحفظها.");
+}
+
+$("productForm").addEventListener("submit",event=>{
+  event.preventDefault();
+  const name = $("productName").value.trim();
+  const code = $("productCode").value.trim();
+  const qty = Number($("productQty").value);
+  const limit = Number($("productLimit").value);
+  if (!name || !Number.isSafeInteger(qty) || qty<0 ||
+      !Number.isSafeInteger(limit) || limit<0) {
+    notify("تحقق من الاسم وأدخل كميات صحيحة غير سالبة.");
+    return;
+  }
+  if (code && state.products.some(p=>p.code.toLowerCase()===code.toLowerCase())) {
+    notify("رمز المنتج موجود بالفعل. استخدم رمزًا مختلفًا.");
+    return;
+  }
+  const product = {
+    id:Date.now().toString(36)+Math.random().toString(36).slice(2),
+    name,code,qty,limit
+  };
+  const next = {
+    products:[...state.products,product],
+    history:qty>0 ? [...state.history,{
+      name,type:"in",qty,date:new Date().toISOString()
+    }] : [...state.history]
+  };
+  if (persist(next)) {
+    event.target.reset();
+    notify("تمت إضافة المنتج وحفظه.");
+  }
+});
+
+$("search").addEventListener("input",render);
+render();
+</script>
+</body>
+</html>
