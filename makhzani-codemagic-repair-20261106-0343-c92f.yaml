@@ -1,0 +1,157 @@
+workflows:
+  android-apk:
+    name: Build Makhzani Android APK
+    max_build_duration: 30
+    environment:
+      java: 17
+    scripts:
+      - name: Create Android project files
+        script: |
+          set -eu
+          mkdir -p 'android'
+          cat > 'android/settings.gradle' <<'MAKHZANI_SOURCE_EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'Makhzani'
+          include ':app'
+          MAKHZANI_SOURCE_EOF
+          mkdir -p 'android'
+          cat > 'android/build.gradle' <<'MAKHZANI_SOURCE_EOF'
+          plugins { id 'com.android.application' version '8.9.1' apply false }
+          MAKHZANI_SOURCE_EOF
+          mkdir -p 'android'
+          cat > 'android/gradle.properties' <<'MAKHZANI_SOURCE_EOF'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          MAKHZANI_SOURCE_EOF
+          mkdir -p 'android/app'
+          cat > 'android/app/build.gradle' <<'MAKHZANI_SOURCE_EOF'
+          plugins { id 'com.android.application' }
+          android {
+           namespace 'store.digitaly.makhzani'
+           compileSdk 35
+           defaultConfig {
+            applicationId 'store.digitaly.makhzani'
+            minSdk 23
+            targetSdk 35
+            versionCode 1
+            versionName '1.0.0'
+           }
+          }
+          dependencies { implementation 'androidx.webkit:webkit:1.12.1' }
+          MAKHZANI_SOURCE_EOF
+          mkdir -p 'android/app/src/main'
+          cat > 'android/app/src/main/AndroidManifest.xml' <<'MAKHZANI_SOURCE_EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <application android:allowBackup="false" android:label="مخزني الذكي" android:icon="@drawable/app_icon" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false" android:supportsRtl="true">
+          <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+          <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+          </activity>
+          </application>
+          </manifest>
+          MAKHZANI_SOURCE_EOF
+          mkdir -p 'android/app/src/main/java/store/digitaly/makhzani'
+          cat > 'android/app/src/main/java/store/digitaly/makhzani/MainActivity.java' <<'MAKHZANI_SOURCE_EOF'
+          package store.digitaly.makhzani;
+          
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.*;
+          import android.net.Uri;
+          import android.content.Intent;
+          import android.content.ClipData;
+          import android.util.Base64;
+          import androidx.webkit.WebViewAssetLoader;
+          import java.io.*;
+          
+          public class MainActivity extends Activity {
+           private WebView web;
+           private ValueCallback<Uri[]> fileCallback;
+           private byte[] pendingBackup;
+           private static final int OPEN=10, SAVE=11;
+           @Override public void onCreate(Bundle saved) {
+            super.onCreate(saved);
+            web=new WebView(this); setContentView(web);
+            web.getSettings().setJavaScriptEnabled(true);
+            web.getSettings().setDomStorageEnabled(true);
+            web.getSettings().setAllowFileAccess(false);
+            web.getSettings().setAllowContentAccess(true);
+            final WebViewAssetLoader loader=new WebViewAssetLoader.Builder()
+             .addPathHandler("/assets/",new WebViewAssetLoader.AssetsPathHandler(this)).build();
+            web.setWebViewClient(new WebViewClient(){
+             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){return loader.shouldInterceptRequest(request.getUrl());}
+             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){
+              Uri u=request.getUrl();
+              return !("https".equals(u.getScheme())&&"appassets.androidplatform.net".equals(u.getHost()));
+             }
+            });
+            web.setWebChromeClient(new WebChromeClient(){
+             @Override public boolean onJsPrompt(WebView v,String url,String message,String value,JsPromptResult result){
+              android.widget.EditText input=new android.widget.EditText(MainActivity.this);input.setText(value);
+              input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+              new android.app.AlertDialog.Builder(MainActivity.this).setMessage(message).setView(input)
+               .setPositiveButton("تأكيد",(d,w)->result.confirm(input.getText().toString()))
+               .setNegativeButton("إلغاء",(d,w)->result.cancel()).setOnCancelListener(d->result.cancel()).show();return true;
+             }
+             @Override public boolean onJsConfirm(WebView v,String url,String message,JsResult result){
+              new android.app.AlertDialog.Builder(MainActivity.this).setMessage(message)
+               .setPositiveButton("تأكيد",(d,w)->result.confirm()).setNegativeButton("إلغاء",(d,w)->result.cancel())
+               .setOnCancelListener(d->result.cancel()).show();return true;
+             }
+             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,FileChooserParams params){
+              if(fileCallback!=null)fileCallback.onReceiveValue(null);
+              fileCallback=callback;
+              Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");
+              try{startActivityForResult(i,OPEN);}catch(Exception e){fileCallback.onReceiveValue(null);fileCallback=null;return false;}return true;
+             }
+            });
+            web.addJavascriptInterface(new Object(){
+             @JavascriptInterface public void saveBackup(String encoded){
+              try{
+               final byte[] bytes=Base64.decode(encoded,Base64.DEFAULT);
+               if(bytes.length>10*1024*1024)return;
+               runOnUiThread(()->{
+                pendingBackup=bytes;
+                Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"makhzani-backup-"+System.currentTimeMillis()+".json");
+                try{startActivityForResult(i,SAVE);}catch(Exception e){pendingBackup=null;android.widget.Toast.makeText(MainActivity.this,"تعذر فتح حفظ الملف",1).show();}
+               });
+              }catch(Exception ignored){}
+             }
+            },"MakhzaniAndroid");
+            web.loadUrl("https://appassets.androidplatform.net/assets/web/index.html");
+           }
+           @Override protected void onActivityResult(int request,int result,Intent data){
+            super.onActivityResult(request,result,data);
+            if(request==OPEN&&fileCallback!=null){fileCallback.onReceiveValue(result==RESULT_OK&&data!=null&&data.getData()!=null?new Uri[]{data.getData()}:null);fileCallback=null;}
+            if(request==SAVE){
+             if(result==RESULT_OK&&data!=null&&data.getData()!=null&&pendingBackup!=null){
+              try(OutputStream out=getContentResolver().openOutputStream(data.getData())){
+               if(out==null)throw new IOException();out.write(pendingBackup);
+               android.widget.Toast.makeText(this,"تم حفظ النسخة الاحتياطية",1).show();
+              }catch(Exception e){android.widget.Toast.makeText(this,"لم يتم حفظ النسخة الاحتياطية",1).show();}
+             }
+             pendingBackup=null;
+            }
+           }
+           @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
+          }
+          MAKHZANI_SOURCE_EOF
+          test -s android/settings.gradle
+          test -s android/app/src/main/AndroidManifest.xml
+      - name: Prepare offline web assets
+        script: |
+          set -eu
+          mkdir -p android/app/src/main/assets/web
+          cp index.html sw.js manifest.webmanifest icon.svg icon-192.png icon-512.png android/app/src/main/assets/web/
+          mkdir -p android/app/src/main/res/drawable
+          cp icon-192.png android/app/src/main/res/drawable/app_icon.png
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > android/local.properties
+      - name: Build Android APK
+        script: |
+          set -eu
+          curl --fail --location --retry 3 https://services.gradle.org/distributions/gradle-8.11.1-bin.zip -o /tmp/makhzani-gradle.zip
+          unzip -q /tmp/makhzani-gradle.zip -d /tmp/makhzani-gradle
+          cd android
+          /tmp/makhzani-gradle/gradle-8.11.1/bin/gradle --no-daemon :app:assembleDebug
+    artifacts:
+      - android/app/build/outputs/apk/debug/*.apk
