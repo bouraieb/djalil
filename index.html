@@ -1,23 +1,371 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#172554"><link rel="manifest" href="manifest.webmanifest"><title>مخزني الذكي</title><style>*{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#172554;font:16px Arial}header{background:#172554;color:white;padding:20px}main{max-width:1000px;margin:auto;padding:14px}section{background:white;padding:16px;margin-bottom:14px;border-radius:12px}input,button{font:inherit;padding:11px;border-radius:8px;margin:5px 0}input{border:1px solid #cbd5e1;width:100%}button{border:0;background:#2563eb;color:white;cursor:pointer}button:disabled{opacity:.5}label{display:block}form{display:grid;grid-template-columns:1fr 1fr;gap:10px}form button{grid-column:1/-1}.wrap{overflow:auto}table{width:100%;min-width:520px;border-collapse:collapse}td,th{padding:10px;text-align:right;border-bottom:1px solid #ddd}.low{background:#fff7ed}#message{white-space:pre-wrap;padding:12px}.notice{line-height:1.8;color:#475569}.stats{display:flex;gap:14px;flex-wrap:wrap}@media(max-width:600px){form{grid-template-columns:1fr}}</style></head><body><header><h1>📦 مخزني الذكي</h1><p>إدارة المنتجات وحركة المخزون</p><button id="install" hidden>تثبيت التطبيق</button></header><main><p id="message" role="status" hidden></p><section class="stats"><span>المنتجات: <strong id="count">0</strong></span><span>القطع: <strong id="units">0</strong></span><span>مخزون منخفض: <strong id="low">0</strong></span></section><section><h2>إضافة منتج</h2><form id="form"><label>اسم المنتج<input id="name" required maxlength="100"></label><label>رمز المنتج، اختياري<input id="code" maxlength="50"></label><label>الكمية الأولية<input id="qty" type="number" min="0" step="1" value="0" required></label><label>حد التنبيه<input id="limit" type="number" min="0" step="1" value="5" required></label><button>إضافة المنتج</button></form></section><section><h2>المنتجات</h2><input id="search" placeholder="ابحث بالاسم أو الرمز" aria-label="بحث المنتجات"><div class="wrap"><table><thead><tr><th>المنتج</th><th>الرمز</th><th>الكمية</th><th>الحالة</th><th>الحركة</th></tr></thead><tbody id="products"></tbody></table></div></section><section><h2>سجل الحركات</h2><div class="wrap"><table><thead><tr><th>التاريخ</th><th>المنتج</th><th>الحركة</th><th>الكمية</th></tr></thead><tbody id="history"></tbody></table></div></section><section><h2>النسخ الاحتياطي والنقل بين الأجهزة</h2><button id="export">تصدير نسخة احتياطية</button> <button id="import">استيراد نسخة احتياطية</button><input type="file" id="file" accept=".json,application/json" hidden><p class="notice">صدّر الملف ثم أرسله بالبلوتوث أو كابل USB باستخدام خيارات جهازك. افتح التطبيق على الجهاز الآخر واستورد الملف. الاستيراد يستبدل بيانات هذا الجهاز ولا يدمجها. لا توجد مزامنة تلقائية. البيانات محلية؛ احتفظ بنسخة احتياطية خارج المتصفح.</p><p class="notice" id="offline">تجهيز العمل دون إنترنت يتطلب فتح التطبيق أول مرة من موقع HTTPS. انتظر رسالة الجاهزية قبل قطع الاتصال.</p></section></main><script>
-'use strict';
-const $=id=>document.getElementById(id),KEY='makhzani-smart-v1';let state={products:[],history:[]},ready=true;
-function notify(s){$('message').hidden=false;$('message').textContent=s;}
-function valid(s){if(!s||!Array.isArray(s.products)||!Array.isArray(s.history))return false;const ids=new Set(),codes=new Set();for(const p of s.products){if(!p||typeof p.id!=='string'||!p.id||ids.has(p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>100||typeof p.code!=='string'||p.code.length>50||!Number.isSafeInteger(p.qty)||p.qty<0||!Number.isSafeInteger(p.limit)||p.limit<0)return false;ids.add(p.id);const c=p.code.trim().toLowerCase();if(c&&codes.has(c))return false;if(c)codes.add(c);}return s.history.every(h=>h&&typeof h.name==='string'&&['in','out'].includes(h.type)&&Number.isSafeInteger(h.qty)&&h.qty>0&&typeof h.date==='string'&&Number.isFinite(Date.parse(h.date)));}
-try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(!valid(s))throw Error();state=s;}}catch(e){ready=false;notify('تعذرت قراءة البيانات. لم نغيّر البيانات الأصلية. صدّرها للفحص أو استورد نسخة سليمة.');}
-function persist(s){if(!ready){notify('الحفظ محظور لحماية البيانات الأصلية. استورد نسخة سليمة أولًا.');return false;}try{localStorage.setItem(KEY,JSON.stringify(s));state=s;render();return true;}catch(e){notify('تعذر الحفظ. لم يُعتمد التغيير.');return false;}}
-function cell(r,v){const t=document.createElement('td');t.textContent=v;r.append(t);return t;}
-function empty(b,n){const r=document.createElement('tr');cell(r,'لا توجد بيانات.').colSpan=n;b.append(r);}
-function render(){$('count').textContent=state.products.length;$('units').textContent=state.products.reduce((s,p)=>s+p.qty,0);$('low').textContent=state.products.filter(p=>p.qty<=p.limit).length;const b=$('products');b.replaceChildren();const q=$('search').value.trim().toLowerCase();state.products.filter(p=>(p.name+' '+p.code).toLowerCase().includes(q)).forEach(p=>{const r=document.createElement('tr');if(p.qty<=p.limit)r.className='low';cell(r,p.name);cell(r,p.code||'—');cell(r,p.qty);cell(r,p.qty===0?'نفد المخزون':p.qty<=p.limit?'منخفض':'متوفر');const a=cell(r,'');for(const type of ['in','out']){const btn=document.createElement('button');btn.textContent=type==='in'?'دخول +':'خروج −';btn.onclick=()=>move(p.id,type);a.append(btn,' ');}b.append(r);});if(!b.children.length)empty(b,5);const h=$('history');h.replaceChildren();state.history.slice().reverse().forEach(x=>{const r=document.createElement('tr');cell(r,new Date(x.date).toLocaleString('ar-DZ'));cell(r,x.name);cell(r,x.type==='in'?'دخول':'خروج');cell(r,x.qty);h.append(r);});if(!h.children.length)empty(h,4);}
-function move(id,type){const p=state.products.find(p=>p.id===id);if(!p)return;const answer=prompt('أدخل كمية '+(type==='in'?'الدخول: ':'الخروج: ')+p.name);if(answer===null)return;const qty=Number(answer.trim());if(!Number.isSafeInteger(qty)||qty<=0){notify('أدخل عددًا صحيحًا أكبر من صفر.');return;}const n=p.qty+(type==='in'?qty:-qty);if(n<0||!Number.isSafeInteger(n)){notify('الكمية غير مسموحة أو تتجاوز المخزون.');return;}if(persist({products:state.products.map(x=>x.id===id?{...x,qty:n}:x),history:[...state.history,{productId:id,name:p.name,type,qty,date:new Date().toISOString()}]}))notify('تم تسجيل الحركة.');}
-$('form').onsubmit=e=>{e.preventDefault();const name=$('name').value.trim(),code=$('code').value.trim(),qty=Number($('qty').value),limit=Number($('limit').value);if(!name||!Number.isSafeInteger(qty)||qty<0||!Number.isSafeInteger(limit)||limit<0){notify('تحقق من البيانات.');return;}if(code&&state.products.some(p=>p.code.toLowerCase()===code.toLowerCase())){notify('رمز المنتج موجود بالفعل.');return;}const id=Date.now().toString(36)+Math.random().toString(36).slice(2);if(persist({products:[...state.products,{id,name,code,qty,limit}],history:qty?[...state.history,{productId:id,name,type:'in',qty,date:new Date().toISOString()}]:[...state.history]})){e.target.reset();notify('تمت إضافة المنتج.');}};
-$('search').oninput=render;
-function download(data,name){const url=URL.createObjectURL(new Blob([data],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-function stamp(){return new Date().toISOString().replace(/[:.]/g,'-');}
-$('export').onclick=()=>{try{if(!ready){const raw=localStorage.getItem(KEY);if(raw===null)throw Error();download(raw,'makhzani-recovery-'+stamp()+'.json');notify('تم طلب تنزيل البيانات الأصلية للفحص. تحقق من حفظ الملف.');return;}download(JSON.stringify({app:'makhzani-smart',version:1,exportedAt:new Date().toISOString(),data:state},null,2),'makhzani-backup-'+stamp()+'.json');notify('تم طلب تنزيل النسخة. تحقق من وجودها في التنزيلات، ثم أرسلها بالبلوتوث من خيارات جهازك.');}catch(e){notify('تعذر تصدير البيانات.');}};
-$('import').onclick=()=>$('file').click();
-$('file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>20*1024*1024)throw Error('حجم الملف يتجاوز 20 ميغابايت.');const backup=JSON.parse(await file.text());if(backup.app!=='makhzani-smart'||backup.version!==1||!valid(backup.data))throw Error('الملف ليس نسخة احتياطية سليمة ومتوافقة.');const s=backup.data;if(!confirm('سيُستبدل مخزون هذا الجهاز بـ '+s.products.length+' منتج و'+s.history.length+' حركة. صدّر بيانات هذا الجهاز أولًا إذا احتجتها. هل تريد الاستبدال؟'))return;try{localStorage.setItem(KEY,JSON.stringify(s));}catch(err){throw Error('تعذر الحفظ. لم تُستبدل البيانات.');}ready=true;state=s;render();notify('تمت استعادة النسخة على هذا الجهاز.');}catch(err){notify(err.message||'تعذر الاستيراد. لم تتغير البيانات.');}finally{e.target.value='';}};
-let installEvent;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvent=e;$('install').hidden=false;});$('install').onclick=async()=>{if(!installEvent)return;await installEvent.prompt();installEvent=null;$('install').hidden=true;};
-if('serviceWorker'in navigator&&location.protocol!=='file:'){navigator.serviceWorker.register('./sw.js').then(()=>navigator.serviceWorker.ready).then(()=>{$('offline').textContent='تم تجهيز ملفات التطبيق للعمل دون إنترنت على هذا المتصفح. اختبر فتحه بعد قطع الاتصال. احتفظ بنسخة احتياطية من بياناتك.';}).catch(()=>{$('offline').textContent='لم يكتمل تجهيز العمل دون إنترنت. تحقق من نشر جميع الملفات عبر HTTPS.';});}else{$('offline').textContent='يمكن استخدام هذه الصفحة محليًا، لكن التثبيت وتجهيز العمل دون إنترنت من الموقع يتطلبان HTTPS ومتصفحًا داعمًا.';}
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#172554">
+<title>مخزني الذكي</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f1f5f9;color:#172554;font-family:Arial,sans-serif}
+header{background:#172554;color:white;padding:24px}
+h1{margin:0 0 8px;font-size:26px}
+header p{margin:0;color:#dbeafe}
+main{max-width:1000px;margin:auto;padding:16px}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.card,section{background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px #0001}
+.card{flex:1;min-width:130px}
+.card strong{display:block;font-size:26px;margin-bottom:6px}
+section{margin-bottom:16px}
+h2{margin-top:0;font-size:20px}
+form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:block;font-size:14px}
+input,button{font:inherit;border-radius:8px;padding:11px}
+input{width:100%;border:1px solid #cbd5e1;margin-top:6px}
+button{border:0;background:#2563eb;color:white;cursor:pointer}
+form button{grid-column:1/-1}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:520px}
+th,td{text-align:right;padding:12px 8px;border-bottom:1px solid #e2e8f0}
+.low{background:#fff7ed}
+.actions{display:flex;gap:6px}
+.actions button{padding:8px;font-size:13px}
+.out{background:#475569}
+.search{margin-bottom:12px}
+.notice{font-size:14px;color:#475569;line-height:1.7}
+#message{padding:12px;background:#dbeafe;border-radius:8px;margin-bottom:12px}
+@media(max-width:600px){
+form{grid-template-columns:1fr}
+header{padding:20px}
+section{padding:14px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>📦 مخزني الذكي</h1>
+<p>إدارة المنتجات وحركة المخزون بسهولة</p>
+</header>
+
+<main>
+<div id="message" role="status" hidden></div>
+
+<div class="stats">
+<div class="card">
+<strong id="productsCount">0</strong>عدد المنتجات
+</div>
+<div class="card">
+<strong id="unitsCount">0</strong>إجمالي القطع
+</div>
+<div class="card">
+<strong id="lowCount">0</strong>مخزون منخفض
+</div>
+</div>
+
+<section>
+<h2>إضافة منتج</h2>
+<form id="productForm">
+<label>اسم المنتج
+<input id="productName" required maxlength="100" placeholder="مثال: غسالة">
+</label>
+<label>رمز المنتج، اختياري
+<input id="productCode" maxlength="50" placeholder="مثال: P001">
+</label>
+<label>الكمية الأولية
+<input id="productQty" type="number" min="0" step="1" value="0" required>
+</label>
+<label>حد التنبيه
+<input id="productLimit" type="number" min="0" step="1" value="5" required>
+</label>
+<button type="submit">إضافة المنتج</button>
+</form>
+</section>
+
+<section>
+<h2>المنتجات</h2>
+<input id="search" class="search" placeholder="ابحث بالاسم أو الرمز" aria-label="بحث المنتجات">
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>المنتج</th>
+<th>الرمز</th>
+<th>الكمية</th>
+<th>الحالة</th>
+<th>الحركة</th>
+</tr>
+</thead>
+<tbody id="productsBody"></tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>سجل دخول وخروج البضاعة</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>التاريخ</th>
+<th>المنتج</th>
+<th>الحركة</th>
+<th>الكمية</th>
+</tr>
+</thead>
+<tbody id="historyBody"></tbody>
+</table>
+</div>
+<p class="notice">
+البيانات محفوظة في هذا المتصفح فقط.
+مسح بيانات المتصفح قد يحذفها.
+هذه النسخة لا تزامن البيانات بين الأجهزة.
+</p>
+<p id="offlineStatus" class="notice" role="status">
+جارٍ التحقق من تجهيز العمل دون إنترنت…
+</p>
+</section>
+</main>
+
+<script>
+"use strict";
+
+const KEY = "makhzani-smart-v1";
+const $ = id => document.getElementById(id);
+let state = {products:[], history:[]};
+let storageReady = true;
+
+function notify(text) {
+  $("message").textContent = text;
+  $("message").hidden = false;
+}
+
+try {
+  const raw = localStorage.getItem(KEY);
+  if (raw) {
+    const saved = JSON.parse(raw);
+    if (!saved || !Array.isArray(saved.products) ||
+        !Array.isArray(saved.history)) {
+      throw new Error("Invalid data");
+    }
+    state = saved;
+  }
+} catch (error) {
+  storageReady = false;
+  notify("تعذر قراءة البيانات المحفوظة. لن نستبدلها. تأكد من السماح بالتخزين في المتصفح.");
+}
+
+function persist(next) {
+  if (!storageReady) {
+    notify("التخزين غير متاح، لم يتم حفظ التغيير.");
+    return false;
+  }
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next));
+    state = next;
+    render();
+    return true;
+  } catch (error) {
+    notify("تعذر الحفظ، لم يُعتمد التغيير. قد تكون مساحة التخزين ممتلئة.");
+    return false;
+  }
+}
+
+function cell(row, value) {
+  const td = document.createElement("td");
+  td.textContent = value;
+  row.appendChild(td);
+  return td;
+}
+
+function emptyRow(body, count, text) {
+  const row = document.createElement("tr");
+  const td = cell(row, text);
+  td.colSpan = count;
+  body.appendChild(row);
+}
+
+function render() {
+  const products = state.products;
+  $("productsCount").textContent = products.length;
+  $("unitsCount").textContent =
+    products.reduce((sum, p) => sum + p.qty, 0);
+  $("lowCount").textContent =
+    products.filter(p => p.qty <= p.limit).length;
+
+  const query = $("search").value.trim().toLowerCase();
+  const visible = products.filter(p =>
+    (p.name + " " + p.code).toLowerCase().includes(query)
+  );
+
+  const body = $("productsBody");
+  body.replaceChildren();
+
+  visible.forEach(p => {
+    const row = document.createElement("tr");
+    if (p.qty <= p.limit) row.className = "low";
+
+    cell(row, p.name);
+    cell(row, p.code || "—");
+    cell(row, p.qty);
+    cell(
+      row,
+      p.qty === 0 ? "نفد المخزون" :
+      p.qty <= p.limit ? "منخفض" : "متوفر"
+    );
+
+    const actions = cell(row, "");
+    actions.className = "actions";
+
+    ["in", "out"].forEach(type => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = type === "in" ? "دخول +" : "خروج −";
+      if (type === "out") button.className = "out";
+      button.addEventListener("click", () => move(p.id, type));
+      actions.appendChild(button);
+    });
+
+    body.appendChild(row);
+  });
+
+  if (!visible.length) {
+    emptyRow(body, 5, "لا توجد منتجات مطابقة.");
+  }
+
+  const history = $("historyBody");
+  history.replaceChildren();
+
+  state.history.slice().reverse().forEach(item => {
+    const row = document.createElement("tr");
+    cell(row, new Date(item.date).toLocaleString("ar-DZ"));
+    cell(row, item.name);
+    cell(row, item.type === "in" ? "دخول" : "خروج");
+    cell(row, item.qty);
+    history.appendChild(row);
+  });
+
+  if (!state.history.length) {
+    emptyRow(history, 4, "لا توجد حركات بعد.");
+  }
+}
+
+function move(id, type) {
+  const product = state.products.find(p => p.id === id);
+  if (!product) return;
+
+  const answer = prompt(
+    (type === "in" ? "كمية الدخول: " : "كمية الخروج: ") +
+    product.name
+  );
+
+  if (answer === null) return;
+
+  const qty = Number(answer.trim());
+
+  if (!Number.isSafeInteger(qty) || qty <= 0) {
+    notify("أدخل عددًا صحيحًا أكبر من صفر.");
+    return;
+  }
+
+  if (type === "out" && qty > product.qty) {
+    notify("الكمية المطلوبة أكبر من المخزون المتوفر.");
+    return;
+  }
+
+  const nextQty = product.qty + (type === "in" ? qty : -qty);
+
+  if (!Number.isSafeInteger(nextQty)) {
+    notify("الكمية كبيرة جدًا.");
+    return;
+  }
+
+  const next = {
+    products: state.products.map(p =>
+      p.id === id ? {...p, qty:nextQty} : p
+    ),
+    history: [
+      ...state.history,
+      {
+        name:product.name,
+        type,
+        qty,
+        date:new Date().toISOString()
+      }
+    ]
+  };
+
+  if (persist(next)) {
+    notify("تم تسجيل حركة البضاعة وحفظها.");
+  }
+}
+
+$("productForm").addEventListener("submit", event => {
+  event.preventDefault();
+
+  const name = $("productName").value.trim();
+  const code = $("productCode").value.trim();
+  const qty = Number($("productQty").value);
+  const limit = Number($("productLimit").value);
+
+  if (!name || !Number.isSafeInteger(qty) || qty < 0 ||
+      !Number.isSafeInteger(limit) || limit < 0) {
+    notify("تحقق من الاسم وأدخل كميات صحيحة غير سالبة.");
+    return;
+  }
+
+  if (code && state.products.some(
+    p => p.code.toLowerCase() === code.toLowerCase()
+  )) {
+    notify("رمز المنتج موجود بالفعل. استخدم رمزًا مختلفًا.");
+    return;
+  }
+
+  const product = {
+    id:Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name,
+    code,
+    qty,
+    limit
+  };
+
+  const next = {
+    products:[...state.products, product],
+    history:qty > 0 ? [
+      ...state.history,
+      {name, type:"in", qty, date:new Date().toISOString()}
+    ] : [...state.history]
+  };
+
+  if (persist(next)) {
+    event.target.reset();
+    notify("تمت إضافة المنتج وحفظه.");
+  }
+});
+
+$("search").addEventListener("input", render);
 render();
-</script></body></html>
+
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", async () => {
+    try {
+      await navigator.serviceWorker.register("./sw.js");
+      $("offlineStatus").textContent =
+        "جارٍ تجهيز نسخة العمل دون إنترنت…";
+
+      await navigator.serviceWorker.ready;
+
+      $("offlineStatus").textContent =
+        "تم تفعيل خدمة العمل دون إنترنت. نحتاج إلى اختبار فتح التطبيق بعد فصل الاتصال.";
+    } catch (error) {
+      $("offlineStatus").textContent =
+        "لم يكتمل تجهيز العمل دون إنترنت. تحقق من وجود ملف sw.js بجانب index.html.";
+      console.error(error);
+    }
+  });
+} else {
+  $("offlineStatus").textContent =
+    "تجهيز العمل دون إنترنت يتطلب فتح رابط HTTPS في متصفح يدعم هذه الميزة.";
+}
+</script>
+</body>
+</html>
