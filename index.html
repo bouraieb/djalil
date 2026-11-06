@@ -386,6 +386,17 @@ $("exportData").addEventListener("click", () => {
     },null,2)
   ],{type:"application/json"});
 
+  if (window.MakhzaniAndroid && typeof window.MakhzaniAndroid.saveBackup === 'function') {
+    const reader = new FileReader();
+    reader.onload = () => {
+      window.MakhzaniAndroid.saveBackup(String(reader.result).split(',')[1]);
+      notify("اختر مكان حفظ النسخة الاحتياطية في نافذة Android.");
+    };
+    reader.onerror = () => notify("تعذر تجهيز النسخة الاحتياطية.");
+    reader.readAsDataURL(blob);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href=url;
@@ -440,7 +451,9 @@ window.addEventListener("storage", event => {
 $("search").addEventListener("input", render);
 render();
 
-if ("serviceWorker" in navigator && window.isSecureContext) {
+if (window.MakhzaniAndroid) {
+  $("offlineStatus").textContent = "ملفات التطبيق مضمّنة محليًا. البيانات محفوظة على هذا الجهاز فقط؛ صدّر نسخة احتياطية بانتظام.";
+} else if ("serviceWorker" in navigator && window.isSecureContext) {
   window.addEventListener("load", async () => {
     try {
       await navigator.serviceWorker.register("./sw.js");
@@ -464,6 +477,3 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 </script>
 </body>
 </html>
-``` [!Loading](#)
-
-[sidekick-reference-anchor]: <#>
